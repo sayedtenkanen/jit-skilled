@@ -1,20 +1,29 @@
 # jit-skilled
 
-A minimal, self-contained implementation of the SkillTTA pattern
-(retrieve similar past examples -> synthesize a one-off, just-in-time
-task-specific skill -> solve with it -> automatically grade ->
-periodically critique and edit a reusable slot library) applied to a
-research/analysis task: answering factual questions over short documents.
+[![CI](https://github.com/sayedtenkanen/jit-skilled/actions/workflows/ci.yml/badge.svg)](https://github.com/sayedtenkanen/jit-skilled/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-This is a **prototype for adapting the concept**, not a port of the
-[SkillTTA repo](https://github.com/Hydr0pon1c/Skills-on-the-fly). It trades
-the four full agent benchmarks for one small synthetic dataset so you can
-run the entire loop in minutes and see how the pieces fit together.
+A minimal, self-contained prototype of the **SkillTTA** (Skill Test-Time Adaptation) pattern for LLM agents.
+
+## Core idea
+
+Instead of giving an LLM a static prompt for every task, the system:
+
+1. **Retrieves** similar past Q&A examples from a pool (TF-IDF cosine search)
+2. **Synthesizes** a one-off, just-in-time "skill" document (a SKILL.md) tailored to the specific task
+3. **Solves** the task using that skill
+4. **Grades** the answer automatically (exact-match / shared-token comparison)
+5. **Optimizes** offline: a critic/editor loop reviews failures across runs and patches a reusable "slot library" (a YAML file of reusable skill fragments) to improve future performance
+
+## What it's for
+
+It's a **research prototype** to explore whether dynamically generated, task-specific prompts (skills) that evolve over time outperform static prompting. The project demonstrates the full loop on a small synthetic QA dataset so you can run it end-to-end in minutes.
 
 Four LLM backends are supported behind one interface: **Anthropic Claude**
 (cloud), **Ollama** (local, any model you've pulled), **Apple Foundation
-Models** (on-device, macOS 26+/Apple Intelligence, via a Swift helper), and
-a **mock** heuristic that needs no setup at all.
+Models** (on-device, macOS 26+/Apple Intelligence, via a Swift helper), and a
+**mock** heuristic that needs no setup at all.
 
 ## What's here
 
@@ -133,7 +142,7 @@ python -m jitskilled run --llm apple --mode skill \
 ## Tests
 
 ```bash
-pytest         # unit tests + subprocess-level CLI tests, all against MockClient
+pytest         # 76 unit tests + subprocess-level CLI tests, all against MockClient
 ruff check .   # lint
 ```
 
