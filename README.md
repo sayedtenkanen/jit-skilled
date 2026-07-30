@@ -22,8 +22,9 @@ It's a **research prototype** to explore whether dynamically generated, task-spe
 
 Four LLM backends are supported behind one interface: **Anthropic Claude**
 (cloud), **Ollama** (local, any model you've pulled), **Apple Foundation
-Models** (on-device, macOS 26+/Apple Intelligence, via a Swift helper), and a
-**mock** heuristic that needs no setup at all.
+Models** (on-device, macOS 26+/Apple Intelligence, via Apple's official
+`apple-fm-sdk` Python bindings), and a **mock** heuristic that needs no
+setup at all.
 
 ## What's here
 
@@ -47,7 +48,7 @@ src/jitskilled/
   llm.py                   SkillTTALLM interface, PromptedLLM base,
                            AnthropicClient, MockClient, get_client()
   llm_ollama.py            OllamaClient (local models via REST)
-  llm_apple.py             AppleFoundationClient (subprocess bridge)
+  llm_apple.py             AppleFoundationClient (apple-fm-sdk, on-device)
   prompts.py               shared prompt text for all real backends
   _util.py                 robust LLM-JSON-response parsing + retry
   retrieval.py             pure-Python TF-IDF cosine top-k
@@ -61,8 +62,7 @@ src/jitskilled/
   optimize.py              offline critic + multi-candidate editor loop
   run_pipeline.py          eval CLI
   __main__.py              `python -m jitskilled run|optimize`
-apple_foundation_cli/      Swift helper for the Apple backend (build on macOS)
-tests/                     pytest suite (115 tests: unit, CLI subprocess,
+tests/                     pytest suite (111 tests: unit, CLI subprocess,
                            data integrity, Apple backend contract tests)
 runs/                      created when you run the pipeline
 ```
@@ -166,37 +166,42 @@ python -m jitskilled run --llm ollama --mode skill \
 
 ### Apple Foundation Models (on-device, macOS 26+)
 
-Requires building a small Swift CLI helper once, since there's no Python
-API for Apple's on-device model -- see `apple_foundation_cli/README.md`
-for full instructions. This cannot be built or tested in a Linux sandbox;
-treat it as a reference implementation for your Mac.
+Uses Apple's official `apple-fm-sdk` Python package directly -- no
+subprocess, no Swift to compile. Needs a Mac (Apple Silicon), Xcode 26+,
+and Apple Intelligence turned on with the on-device model downloaded
+(Settings > Apple Intelligence & Siri). See
+https://apple.github.io/python-apple-fm-sdk/ for full requirements.
 
 ```bash
-cd apple_foundation_cli && swift build -c release && cd ..
-export APPLE_FM_CLI_PATH="$(pwd)/apple_foundation_cli/.build/release/jitskilled-apple-fm"
+pip install jit-skilled[apple]
 python -m jitskilled run --llm apple --mode skill \
   --slot_library configs/slots_v1.yaml --run_name v1_apple
 ```
 
+This cannot be installed or exercised in a Linux sandbox -- the SDK only
+installs on macOS.
+
 ## Tests
 
 ```bash
-pytest         # 115 tests: unit, subprocess-level CLI, data integrity, and
+pytest         # 111 tests: unit, subprocess-level CLI, data integrity, and
                # Apple-backend contract tests, all against MockClient or a
-               # stub CLI -- no live model or network call required
+               # fake apple_fm_sdk module -- no live model or network call
+               # required
 ruff check .   # lint
 ```
 
-CI (`.github/workflows/ci.yml`) runs both on every push/PR. Real Anthropic
-and Ollama calls are not exercised in CI (no live model available there)
--- they're covered by the shared `PromptedLLM` prompt logic being
-unit-tested once, plus manual testing against a running backend. The Apple
-backend's Swift half can't run in CI either (needs macOS 26+ hardware),
-but its Python half is contract-tested in `tests/test_llm_apple.py`
-against a stub CLI (`tests/fixtures/fake_apple_cli.py`) that faithfully
-emulates the documented stdin/stdout JSON protocol -- including the
-missing-binary, non-zero-exit, malformed-output, and timeout failure
-paths -- via a real subprocess, not a mock of `subprocess.run`.
+CI (`.github/workflows/ci.yml`) runs both on every push/PR. Real Anthropic,
+Ollama, and Apple calls are not exercised in CI (no live model or macOS
+hardware available there) -- they're covered by the shared `PromptedLLM`
+prompt logic being unit-tested once, plus manual testing against a running
+backend. The Apple backend specifically is contract-tested in
+`tests/test_llm_apple.py` against a fake module matching `apple_fm_sdk`'s
+documented public shape (`SystemLanguageModel`, `LanguageModelSession`,
+`GenerationOptions`, `FoundationModelsError`), injected via
+`AppleFoundationClient(sdk=...)` -- covering availability checks,
+instructions/options passthrough, and error translation, without needing
+the real (macOS-only) package installed.
 
 ## Using this for your own project
 
@@ -261,20 +266,22 @@ been addressed, though "addressed" means something more specific than
   scrutiny in: the optimizer's critic/editor loop is only as good as the
   correctness signal it's reacting to, and a biased or noisy grader will
   quietly steer the slot library in the wrong direction.
-- **Apple Foundation Models backend.** Contract-tested, not device-tested.
-  `tests/test_llm_apple.py` exercises `AppleFoundationClient` against a
-  stub CLI (`tests/fixtures/fake_apple_cli.py`) that emulates the
-  documented stdin/stdout JSON protocol over a real subprocess -- covering
-  success, missing binary, non-zero exit, malformed JSON, a missing
-  `"text"` key, and timeout. This proves the Python side holds up its end
-  of the contract. Caveat: the Swift half
-  (`apple_foundation_cli/Sources/jitskilled-apple-fm/main.swift`) still
-  cannot be compiled or run in this environment -- there's no macOS 26+
-  hardware available here. It's written from Apple's publicly documented
-  `FoundationModels` API shape (`LanguageModelSession`,
-  `GenerationOptions`, `SystemLanguageModel.default.availability`) but has
-  not been built or exercised against a real device. If it fails to
-  compile against your SDK, that's expected risk, not a regression --
-  check Apple's current documentation and adjust `main.swift`; the
-  stdin/stdout contract the Python side depends on is what's actually
-  verified here.
+- **Apple Foundation Models backend.** Contract-tested, not device-tested
+  -- and simpler than it was. This backend originally shelled out to a
+  hand-written Swift CLI, since there was no Python API for Apple's
+  on-device model at the time. Apple has since shipped one directly
+  (`apple-fm-sdk`, https://apple.github.io/python-apple-fm-sdk/), so
+  `llm_apple.py` now calls `apple_fm_sdk.LanguageModelSession` in-process
+  -- no subprocess, no Swift package to compile, no hand-rolled JSON
+  contract to keep in sync. `tests/test_llm_apple.py` exercises
+  `AppleFoundationClient` against a fake module matching the SDK's
+  documented public shape, covering availability checks, instructions/
+  options passthrough, and error translation. Caveat: this still cannot
+  be verified beyond that contract in this environment -- there's no
+  macOS 26+/Apple Silicon hardware available here, so the real
+  `apple-fm-sdk` package has never actually been installed or run against
+  live on-device model here. The fake in the tests mirrors Apple's
+  published API reference as of when this was written; if the real SDK's
+  behavior has since diverged (error types, `respond()` signature,
+  `GenerationOptions` fields), that would surface as a real failure on
+  first use, not something these tests can catch.

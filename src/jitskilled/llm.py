@@ -9,8 +9,9 @@ of the codebase never needs to know which backend is in use:
     REST API. No API key, no extra Python dependency -- needs `ollama
     serve` running with a model pulled.
   - AppleFoundationClient (llm_apple.py): Apple's on-device Foundation
-    Models framework, via a small Swift CLI helper you build separately
-    (see apple_foundation_cli/). macOS 26+ with Apple Intelligence only.
+    Models framework, via Apple's own `apple-fm-sdk` Python bindings
+    (`pip install jit-skilled[apple]`). macOS 26+/Apple Silicon with
+    Apple Intelligence only.
   - MockClient: a deterministic, keyword-overlap heuristic. It exists so
     the whole pipeline is runnable and testable with zero setup. It does
     NOT demonstrate that skills improve accuracy -- it proves the plumbing

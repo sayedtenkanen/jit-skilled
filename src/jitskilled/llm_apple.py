@@ -1,82 +1,76 @@
-"""Apple Foundation Models backend: shells out to a small Swift CLI helper
-that wraps Apple's on-device `FoundationModels` framework.
-
-There is no public Python (or any non-Swift) API for Apple's on-device
-model, so this backend works by subprocess: Python writes one JSON object
-to the helper's stdin and reads one JSON object back from its stdout. The
-helper's source is in apple_foundation_cli/ at the repo root -- you build
-it once with Swift on your Mac; this Python code never talks to Apple's
-framework directly.
+"""Apple Foundation Models backend: talks to Apple's on-device model
+directly via `apple-fm-sdk`, Apple's own Python bindings for the
+`FoundationModels` framework (see
+https://apple.github.io/python-apple-fm-sdk/). No subprocess, no Swift to
+compile -- earlier versions of this backend shelled out to a hand-written
+Swift CLI helper because there was no Python API; Apple has since shipped
+one directly, which this backend uses instead.
 
 Requirements (on your machine, not this pipeline):
-  - macOS 26 (Tahoe) or newer, Apple Intelligence enabled, model downloaded
-    (Settings > Apple Intelligence & Siri).
-  - Xcode / Swift toolchain to build apple_foundation_cli/.
-  - `swift build -c release` inside apple_foundation_cli/, then either put
-    the resulting binary on PATH as `jitskilled-apple-fm`, or point
-    APPLE_FM_CLI_PATH at it directly.
+  - macOS 26+ with Apple Intelligence turned on and the on-device model
+    downloaded (Settings > Apple Intelligence & Siri).
+  - Apple Silicon Mac, Xcode 26+, Python 3.10+.
+  - `pip install jit-skilled[apple]` (installs apple-fm-sdk).
 
-This backend cannot be exercised in a Linux sandbox -- the stdin/stdout
-JSON contract below is what's tested from the Python side; the Swift half
-needs to be built and run on an actual Mac.
-
-Configuration (env var, optional):
-  APPLE_FM_CLI_PATH  default: "jitskilled-apple-fm" (must be on PATH)
+This backend cannot be imported or exercised in a Linux sandbox -- the SDK
+itself only installs on macOS. tests/test_llm_apple.py contract-tests the
+Python-side logic (session creation, instructions/options mapping, error
+translation, availability checks) against a fake module matching
+apple_fm_sdk's documented shape, injected via the `sdk` constructor
+parameter -- not the real (macOS-only) package.
 """
 from __future__ import annotations
 
-import json
-import os
-import subprocess
+import asyncio
+from typing import Any
 
 from .llm import PromptedLLM
 
-_DEFAULT_CLI = "jitskilled-apple-fm"
-_TIMEOUT_SECONDS = 120
+
+def _import_sdk() -> Any:
+    try:
+        import apple_fm_sdk
+    except ImportError as exc:
+        raise ImportError(
+            "The 'apple' backend needs apple-fm-sdk, which only installs "
+            "on macOS 26+ with an Apple Silicon Mac (see "
+            "https://apple.github.io/python-apple-fm-sdk/ for full "
+            "requirements). Install it with: pip install jit-skilled[apple]"
+        ) from exc
+    return apple_fm_sdk
 
 
 class AppleFoundationClient(PromptedLLM):
-    def __init__(self, cli_path: str | None = None, timeout: int = _TIMEOUT_SECONDS):
-        self._cli_path = cli_path or os.environ.get("APPLE_FM_CLI_PATH") or _DEFAULT_CLI
-        # Overridable so tests can contract-test the stdin/stdout JSON
-        # protocol (including the timeout path itself) against a stub CLI
-        # in seconds rather than waiting on the real 120s default.
-        self._timeout = timeout
+    def __init__(self, sdk: Any = None):
+        # `sdk` is overridable so tests can inject a fake apple_fm_sdk
+        # module without the real (macOS-only) package being installed.
+        self._fm = sdk if sdk is not None else _import_sdk()
+
+        model = self._fm.SystemLanguageModel()
+        is_available, reason = model.is_available()
+        if not is_available:
+            raise RuntimeError(
+                f"Apple on-device Foundation Model is not available: "
+                f"{reason}. Check System Settings > Apple Intelligence & "
+                "Siri, and that the on-device model has finished "
+                "downloading."
+            )
+        self._model = model
 
     def _complete(self, system: str, user: str, max_tokens: int = 800) -> str:
-        request = json.dumps({"system": system, "user": user, "max_tokens": max_tokens})
         try:
-            proc = subprocess.run(
-                [self._cli_path],
-                input=request,
-                capture_output=True,
-                text=True,
-                timeout=self._timeout,
-            )
-        except FileNotFoundError as exc:
+            return asyncio.run(self._respond(system, user, max_tokens))
+        except self._fm.FoundationModelsError as exc:
             raise RuntimeError(
-                f"Could not find Apple Foundation Models CLI helper "
-                f"{self._cli_path!r}. Build it from apple_foundation_cli/ "
-                "with `swift build -c release` on macOS 26+, then set "
-                "APPLE_FM_CLI_PATH to the built binary (or put it on PATH "
-                f"as {_DEFAULT_CLI!r})."
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"Apple Foundation Models CLI helper timed out after "
-                f"{self._timeout}s."
+                f"Apple Foundation Models request failed: {exc}"
             ) from exc
 
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"Apple Foundation Models CLI helper exited with code "
-                f"{proc.returncode}: {proc.stderr.strip()}"
-            )
-
-        try:
-            return json.loads(proc.stdout)["text"].strip()
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            raise RuntimeError(
-                f"Unexpected output from Apple Foundation Models CLI helper: "
-                f"{proc.stdout!r}"
-            ) from exc
+    async def _respond(self, system: str, user: str, max_tokens: int) -> str:
+        # A fresh session per call, not a persisted multi-turn conversation:
+        # each SkillTTA step (synthesize/solve/critic/editor/judge) is an
+        # independent one-shot request, matching how every other backend
+        # in this codebase is used (see PromptedLLM in llm.py).
+        session = self._fm.LanguageModelSession(instructions=system, model=self._model)
+        options = self._fm.GenerationOptions(maximum_response_tokens=max_tokens)
+        response = await session.respond(user, options=options)
+        return response.strip() if isinstance(response, str) else str(response)

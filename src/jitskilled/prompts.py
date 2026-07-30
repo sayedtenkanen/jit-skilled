@@ -61,6 +61,9 @@ def solve_prompt(question: str, document_text: str,
     system = (
         "Answer the question using only the provided document. "
         "If a SKILL is provided, follow its instructions exactly. "
+        "Do NOT use any tools, functions, or API calls. "
+        "Do NOT emit tool calls or function invocations. "
+        "Read the document text below and answer directly. "
         "Respond with the answer only, no explanation."
     )
     skill_block = f"SKILL:\n{skill_text}\n\n" if skill_text else ""

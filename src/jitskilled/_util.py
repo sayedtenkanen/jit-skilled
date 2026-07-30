@@ -37,6 +37,7 @@ def retry_with_backoff(fn: Callable[..., _T], *args: Any,
                 or "502" in msg or "503" in msg or "529" in msg
                 or "overloaded" in msg or "try again" in msg
                 or "connection" in msg or "temporarily" in msg
+                or "decoding" in msg or "decode" in msg
             )
             if not _retryable:
                 raise

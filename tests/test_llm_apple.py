@@ -1,130 +1,152 @@
-"""Contract tests for AppleFoundationClient against a stub CLI.
+"""Contract tests for AppleFoundationClient against a fake apple_fm_sdk.
 
-The real `jitskilled-apple-fm` binary is Swift, needs macOS 26+ with Apple
-Intelligence, and can't be built or run in this (Linux) sandbox -- see
-apple_foundation_cli/README.md. What CAN be verified here, without a Mac,
-is that AppleFoundationClient correctly speaks the stdin/stdout JSON
-contract documented in llm_apple.py and apple_foundation_cli/Sources/
-jitskilled-apple-fm/main.swift: request encoding, response decoding, and
-every documented failure mode (missing binary, non-zero exit, malformed
-JSON, missing "text" key, timeout).
+The real `apple-fm-sdk` package only installs on macOS 26+ with Apple
+Silicon (see https://apple.github.io/python-apple-fm-sdk/), so it can't be
+installed or exercised in this (Linux) sandbox. What CAN be verified here,
+without a Mac, is that AppleFoundationClient correctly drives the SDK's
+documented shape: SystemLanguageModel().is_available(), constructing a
+LanguageModelSession with `instructions`/`model`, passing
+GenerationOptions(maximum_response_tokens=...), awaiting session.respond(),
+and translating apple_fm_sdk.FoundationModelsError into a RuntimeError.
 
-These tests spawn a real subprocess (tests/fixtures/fake_apple_cli.py)
-rather than mocking subprocess.run, so they exercise the actual
-serialization/deserialization boundary -- not just that the right function
-was called.
+The fake below mirrors the real SDK's public surface (class names, method
+signatures, return shapes) as documented at
+https://apple.github.io/python-apple-fm-sdk/api/ -- it's injected via the
+`sdk` constructor parameter rather than mocking internals, so these tests
+exercise the same call sequence AppleFoundationClient would make against
+the real package.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
-from jitskilled.llm_apple import AppleFoundationClient
-
-FAKE_CLI = str(Path(__file__).parent / "fixtures" / "fake_apple_cli.py")
+from jitskilled.llm_apple import AppleFoundationClient, _import_sdk
 
 
-def _client(**kwargs) -> AppleFoundationClient:
-    kwargs.setdefault("cli_path", FAKE_CLI)
-    kwargs.setdefault("timeout", 5)
-    return AppleFoundationClient(**kwargs)
+class FakeFoundationModelsError(Exception):
+    """Stand-in for apple_fm_sdk.FoundationModelsError."""
+
+
+class FakeGenerationOptions:
+    def __init__(self, maximum_response_tokens=None, **kwargs):
+        self.maximum_response_tokens = maximum_response_tokens
+
+
+class FakeSystemLanguageModel:
+    def __init__(self, available: bool, reason: str):
+        self._available = available
+        self._reason = reason
+
+    def is_available(self):
+        return self._available, self._reason
+
+
+class FakeLanguageModelSession:
+    def __init__(self, instructions, model, behavior: str):
+        self.instructions = instructions
+        self.model = model
+        self._behavior = behavior
+        self.last_prompt = None
+        self.last_options = None
+
+    async def respond(self, prompt, options=None):
+        self.last_prompt = prompt
+        self.last_options = options
+        if self._behavior == "error":
+            raise FakeFoundationModelsError("simulated generation failure")
+        if self._behavior == "empty":
+            return ""
+        max_tok = options.maximum_response_tokens if options else None
+        return f"echo: {prompt} (max_tokens={max_tok})"
+
+
+class FakeSDK:
+    """Fake apple_fm_sdk module, injected via AppleFoundationClient(sdk=...)."""
+
+    FoundationModelsError = FakeFoundationModelsError
+
+    def __init__(self, model_available=True, model_reason="ok", session_behavior="echo"):
+        self._model_available = model_available
+        self._model_reason = model_reason
+        self._session_behavior = session_behavior
+        self.last_session: FakeLanguageModelSession | None = None
+
+    def SystemLanguageModel(self):
+        return FakeSystemLanguageModel(self._model_available, self._model_reason)
+
+    def GenerationOptions(self, **kwargs):
+        return FakeGenerationOptions(**kwargs)
+
+    def LanguageModelSession(self, instructions=None, model=None):
+        session = FakeLanguageModelSession(instructions, model, self._session_behavior)
+        self.last_session = session
+        return session
 
 
 def test_success_round_trip():
-    client = _client()
+    client = AppleFoundationClient(sdk=FakeSDK())
     result = client._complete("system prompt", "hello world", max_tokens=50)
-    assert result == "echo: hello world"
+    assert result == "echo: hello world (max_tokens=50)"
 
 
-def test_solve_uses_complete_and_strips_result():
-    # Exercises the inherited PromptedLLM.solve() path end to end, not just
-    # _complete() directly, to prove the base-class wiring works against a
-    # real backend implementation too.
-    client = _client()
+def test_solve_uses_complete_end_to_end():
+    # Exercises the inherited PromptedLLM.solve() path, not just
+    # _complete() directly, to prove the base-class wiring works against
+    # this backend too.
+    client = AppleFoundationClient(sdk=FakeSDK())
     answer = client.solve("What is the capital?", "doc text")
     assert answer.startswith("echo:")
 
 
-def test_missing_binary_raises_clear_runtime_error():
-    client = _client(cli_path="/nonexistent/path/to/jitskilled-apple-fm")
-    with pytest.raises(RuntimeError, match="Could not find Apple Foundation Models CLI helper"):
-        client._complete("system", "hello")
+def test_instructions_passed_as_session_instructions():
+    fake_sdk = FakeSDK()
+    client = AppleFoundationClient(sdk=fake_sdk)
+    client._complete("SYSTEM TEXT", "user text", max_tokens=100)
+    assert fake_sdk.last_session.instructions == "SYSTEM TEXT"
 
 
-def test_cli_nonzero_exit_raises_with_stderr_content():
-    client = _client()
-    with pytest.raises(RuntimeError, match="exited with code"):
-        client._complete("system", "TRIGGER_CLI_ERROR please answer")
+def test_max_tokens_passed_through_as_generation_option():
+    fake_sdk = FakeSDK()
+    client = AppleFoundationClient(sdk=fake_sdk)
+    client._complete("system", "user", max_tokens=321)
+    assert fake_sdk.last_session.last_options.maximum_response_tokens == 321
 
 
-def test_cli_nonzero_exit_includes_apple_error_message():
-    client = _client()
-    with pytest.raises(RuntimeError, match="not available"):
-        client._complete("system", "TRIGGER_CLI_ERROR please answer")
+def test_model_unavailable_raises_at_construction():
+    fake_sdk = FakeSDK(model_available=False, model_reason="Apple Intelligence is disabled")
+    with pytest.raises(RuntimeError, match="not available.*Apple Intelligence is disabled"):
+        AppleFoundationClient(sdk=fake_sdk)
 
 
-def test_malformed_json_output_raises_clear_error():
-    client = _client()
-    with pytest.raises(RuntimeError, match="Unexpected output"):
-        client._complete("system", "TRIGGER_MALFORMED_OUTPUT please answer")
+def test_generation_error_wrapped_as_runtime_error():
+    client = AppleFoundationClient(sdk=FakeSDK(session_behavior="error"))
+    with pytest.raises(RuntimeError, match="Apple Foundation Models request failed"):
+        client._complete("system", "user")
 
 
-def test_missing_text_key_raises_clear_error():
-    client = _client()
-    with pytest.raises(RuntimeError, match="Unexpected output"):
-        client._complete("system", "TRIGGER_MISSING_TEXT_KEY please answer")
+def test_empty_response_does_not_raise():
+    client = AppleFoundationClient(sdk=FakeSDK(session_behavior="empty"))
+    assert client._complete("system", "user") == ""
 
 
-def test_timeout_raises_clear_error():
-    # timeout=1 in the client, fake CLI sleeps 30s on this marker -- proves
-    # the TimeoutExpired path is wired up, without a slow test.
-    client = _client(timeout=1)
-    with pytest.raises(RuntimeError, match="timed out after 1s"):
-        client._complete("system", "TRIGGER_TIMEOUT please answer")
+def test_missing_package_raises_clear_import_error():
+    # apple_fm_sdk is an optional extra; skip if it IS installed.
+    try:
+        import apple_fm_sdk  # noqa: F401
+        pytest.skip("apple-fm-sdk is installed; "
+                    "missing-dependency path not exercisable")
+    except ImportError:
+        pass
+    with pytest.raises(ImportError, match="pip install jit-skilled\\[apple\\]"):
+        AppleFoundationClient()
 
 
-def test_default_timeout_is_120_seconds_when_unset():
-    client = AppleFoundationClient(cli_path=FAKE_CLI)
-    assert client._timeout == 120
-
-
-def test_cli_path_env_var_used_when_no_explicit_path(monkeypatch):
-    monkeypatch.setenv("APPLE_FM_CLI_PATH", FAKE_CLI)
-    client = AppleFoundationClient()
-    assert client._cli_path == FAKE_CLI
-
-
-def test_explicit_cli_path_overrides_env_var(monkeypatch):
-    monkeypatch.setenv("APPLE_FM_CLI_PATH", "/some/other/path")
-    client = AppleFoundationClient(cli_path=FAKE_CLI)
-    assert client._cli_path == FAKE_CLI
-
-
-def test_defaults_to_jitskilled_apple_fm_on_path(monkeypatch):
-    monkeypatch.delenv("APPLE_FM_CLI_PATH", raising=False)
-    client = AppleFoundationClient()
-    assert client._cli_path == "jitskilled-apple-fm"
-
-
-@pytest.mark.skipif(
-    sys.platform != "linux" and sys.platform != "darwin",
-    reason="shebang execution assumed for the fixture script",
-)
-def test_fake_cli_is_directly_executable():
-    """Sanity check that the fixture itself is runnable as `[path]` (no
-    `python3` prefix), matching how AppleFoundationClient invokes
-    self._cli_path -- i.e. it's a faithful stand-in for a compiled binary.
-    """
-    import subprocess
-
-    proc = subprocess.run(
-        [FAKE_CLI],
-        input='{"system": "s", "user": "hi", "max_tokens": 10}',
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    assert proc.returncode == 0
-    assert '"text"' in proc.stdout
+def test_import_sdk_reraises_as_import_error_with_install_hint():
+    try:
+        import apple_fm_sdk  # noqa: F401
+        pytest.skip("apple-fm-sdk is installed; "
+                    "missing-dependency path not exercisable")
+    except ImportError:
+        pass
+    with pytest.raises(ImportError, match="apple-fm-sdk"):
+        _import_sdk()
