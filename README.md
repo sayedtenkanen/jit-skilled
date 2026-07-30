@@ -167,15 +167,37 @@ python -m jitskilled run --llm ollama --mode skill \
 ### Apple Foundation Models (on-device, macOS 26+)
 
 Uses Apple's official `apple-fm-sdk` Python package directly -- no
-subprocess, no Swift to compile. Needs a Mac (Apple Silicon), Xcode 26+,
-and Apple Intelligence turned on with the on-device model downloaded
-(Settings > Apple Intelligence & Siri). See
-https://apple.github.io/python-apple-fm-sdk/ for full requirements.
+subprocess, no Swift to compile.
+
+**Prerequisites:**
+- macOS 26+ (Tahoe)
+- Apple Silicon Mac (M1/M2/M3/M4)
+- Xcode 26+ installed
+- Apple Intelligence turned on (Settings > Apple Intelligence & Siri)
+- On-device model downloaded
+
+See https://apple.github.io/python-apple-fm-sdk/ for full requirements.
 
 ```bash
+# Install
 pip install jit-skilled[apple]
+
+# Quick test (no skill, fastest way to verify it works)
+python -m jitskilled run --llm apple --mode zero_shot --run_name apple_zero_shot
+
+# Skill-conditioned run
 python -m jitskilled run --llm apple --mode skill \
-  --slot_library configs/slots_v1.yaml --run_name v1_apple
+  --slot_library configs/slots_v1.yaml --run_name apple_skill
+
+# Optimize (compare against a previous run)
+python -m jitskilled optimize \
+  --current_run runs/apple_skill --previous_run runs/apple_zero_shot \
+  --slot_library configs/slots_v1.yaml --output_prefix configs/slots_v2
+
+# Re-run with optimized slot library
+cp configs/slots_v2_candidate1.yaml configs/slots_v2.yaml
+python -m jitskilled run --llm apple --mode skill \
+  --slot_library configs/slots_v2.yaml --run_name apple_v2
 ```
 
 This cannot be installed or exercised in a Linux sandbox -- the SDK only
