@@ -58,6 +58,20 @@ def test_mock_editor_returns_operations_list():
     assert len(result["operations"]) >= 1
 
 
+def test_mock_editor_varies_by_candidate_index():
+    llm = MockClient()
+    results = [llm.editor({"case_critic_results": [], "candidate_index": i})
+               for i in (1, 2, 3)]
+    slot_ids = [r["operations"][0]["slot_id"] for r in results]
+    assert len(set(slot_ids)) == 3, f"expected 3 distinct candidates, got {slot_ids}"
+
+
+def test_mock_editor_defaults_to_candidate_1_when_unspecified():
+    with_default = MockClient().editor({"case_critic_results": []})
+    explicit_1 = MockClient().editor({"case_critic_results": [], "candidate_index": 1})
+    assert with_default == explicit_1
+
+
 def test_parse_json_response_extracts_object_from_prose():
     text = 'Sure, here is the JSON:\n{"a": 1, "b": [1, 2]}\nHope that helps!'
     assert parse_json_response(text) == {"a": 1, "b": [1, 2]}

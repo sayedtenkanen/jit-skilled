@@ -57,6 +57,27 @@ def test_run_skill_mode_writes_skill_files(tmp_path, project_root, cli_env):
     assert list(skills_dir.glob("*.md"))
 
 
+def test_embeddings_retrieval_fails_gracefully_without_dependency(
+    tmp_path, project_root, cli_env
+):
+    # sentence-transformers is an optional extra; this test only makes sense
+    # when it's NOT installed. If it IS installed, skip.
+    try:
+        import sentence_transformers  # noqa: F401
+        pytest.skip("sentence-transformers is installed; "
+                    "missing-dependency path not exercisable")
+    except ImportError:
+        pass
+    proc = _run_cli(
+        "run", "--mode", "skill", "--retrieval", "embeddings",
+        "--slot_library", str(project_root / "configs" / "slots_v1.yaml"),
+        "--run_name", "pytest_embeddings", "--runs_dir", str(tmp_path),
+        cwd=project_root, env=cli_env,
+    )
+    assert proc.returncode != 0
+    assert "jit-skilled[embeddings]" in proc.stderr
+
+
 def test_missing_required_arg_exits_nonzero(tmp_path, project_root, cli_env):
     # --mode is required; omitting it should fail argparse, not crash weirdly.
     proc = _run_cli("run", "--run_name", "pytest_missing_mode",
@@ -79,19 +100,29 @@ def test_optimize_end_to_end_via_module_cli(tmp_path, project_root, cli_env):
     )
     assert skill_v1.returncode == 0, skill_v1.stderr
 
-    output_path = tmp_path / "slots_v2.yaml"
+    output_prefix = tmp_path / "slots_v2"
     optimize = _run_cli(
         "optimize",
         "--current_run", str(tmp_path / "v1"),
         "--previous_run", str(tmp_path / "zero_shot"),
         "--slot_library", str(project_root / "configs" / "slots_v1.yaml"),
-        "--output", str(output_path),
+        "--output_prefix", str(output_prefix),
+        "--num_candidates", "3",
         cwd=project_root, env=cli_env,
     )
     assert optimize.returncode == 0, optimize.stderr
-    assert output_path.exists()
-    summary_path = tmp_path / "slots_v2_optimize_summary.json"
+
+    candidate_paths = [tmp_path / f"slots_v2_candidate{i}.yaml" for i in (1, 2, 3)]
+    for path in candidate_paths:
+        assert path.exists(), f"missing {path}"
+
+    summary_path = tmp_path / "slots_v2_summary.json"
     assert summary_path.exists()
     summary = json.loads(summary_path.read_text())
     assert "transition_counts" in summary
-    assert "editor_patch" in summary
+    assert len(summary["candidates"]) == 3
+
+    # Candidates should be genuinely different from each other, not the
+    # same patch written three times -- MockClient varies by candidate_index.
+    candidate_texts = [p.read_text() for p in candidate_paths]
+    assert len(set(candidate_texts)) > 1, "all candidates are identical"

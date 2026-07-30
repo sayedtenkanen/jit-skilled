@@ -26,6 +26,22 @@ def test_synthesize_skill_prompt_handles_empty_retrieved():
     assert "no similar examples" in user.lower()
 
 
+def test_synthesize_skill_prompt_surfaces_prior_attempt_when_present():
+    retrieved_with_trajectory = [{
+        "question": "What was margin?", "ground_truth": "61%", "source_doc": "q3",
+        "prior_attempt": "60%", "prior_label": "fail",
+    }]
+    _, user = synthesize_skill_prompt("FW", "SL", TARGET, retrieved_with_trajectory)
+    assert "60%" in user
+    assert "WRONG" in user
+
+
+def test_synthesize_skill_prompt_prior_attempt_is_optional():
+    # RETRIEVED has no prior_attempt/prior_label -- must not KeyError.
+    system, user = synthesize_skill_prompt("FW", "SL", TARGET, RETRIEVED)
+    assert "margin" in user
+
+
 def test_solve_prompt_without_skill():
     system, user = solve_prompt("Q?", "Document text.")
     assert "Document text." in user

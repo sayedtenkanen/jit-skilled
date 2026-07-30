@@ -10,6 +10,28 @@ import json
 from typing import Any
 
 
+def _render_retrieved_example(r: dict[str, Any]) -> str:
+    """Render one retrieved pool item for the synthesis prompt.
+
+    When the pool item carries a recorded `prior_attempt` / `prior_label`
+    (see scripts/generate_evolve_attempts.py), include what was actually
+    tried and whether it worked -- not just the gold answer. This mirrors
+    real SkillTTA's retrieval of past trajectories rather than bare Q&A
+    pairs. Items without those fields (e.g. a hand-written pool that
+    hasn't been through the generator) still render fine.
+    """
+    lines = [
+        f"- Q: {r['question']}",
+        f"  correct answer: {r['ground_truth']}",
+        f"  (doc: {r['source_doc']})",
+    ]
+    attempt, label = r.get("prior_attempt"), r.get("prior_label")
+    if attempt is not None and label is not None:
+        verdict = "CORRECT" if label == "pass" else "WRONG"
+        lines.append(f"  prior zero-shot attempt: {attempt!r} -> {verdict}")
+    return "\n".join(lines)
+
+
 def synthesize_skill_prompt(framework: str, slot_library_text: str,
                              target: dict[str, Any],
                              retrieved: list[dict[str, Any]]) -> tuple[str, str]:
@@ -21,15 +43,15 @@ def synthesize_skill_prompt(framework: str, slot_library_text: str,
         "document, not answering the question."
     )
     retrieved_block = "\n\n".join(
-        f"- Q: {r['question']}\n  A: {r['ground_truth']}\n  (doc: {r['source_doc']})"
-        for r in retrieved
+        _render_retrieved_example(r) for r in retrieved
     ) or "(no similar examples retrieved)"
     user = (
         f"{framework}\n\n---\nCANDIDATE SLOT LIBRARY (guidance you may draw on):\n"
         f"{slot_library_text}\n\n---\nTARGET TASK:\nQuestion: {target['question']}\n"
         f"Source document: {target['source_doc']}\n\n---\nRETRIEVED EXAMPLES "
-        f"(similar past questions with known-correct answers):\n{retrieved_block}\n\n"
-        "Write the SKILL.md now."
+        f"(similar past questions, their correct answers, and -- where "
+        f"recorded -- a prior zero-shot attempt and whether it was right):"
+        f"\n{retrieved_block}\n\nWrite the SKILL.md now."
     )
     return system, user
 
@@ -61,6 +83,28 @@ def critic_prompt(case_payload: dict[str, Any]) -> tuple[str, str]:
     return system, user
 
 
+def judge_prompt(question: str, answer: str, ground_truth: str) -> tuple[str, str]:
+    """For grader.grade_with_judge's escalation path: cases the fast
+    deterministic check in grader.py couldn't confidently resolve (no
+    shared numeric token, no exact/boundary text match) -- typically
+    free-text answers phrased differently than the reference. Ask an LLM
+    whether they're substantively the same answer.
+    """
+    system = (
+        "You are a grading judge. Decide whether a candidate answer is "
+        "substantively correct given the reference answer, allowing for "
+        "different phrasing, synonyms, or extra context -- but not for "
+        "different facts, numbers, or entities. Return ONLY a JSON object: "
+        '{"correct": true|false, "reason": "one grounded sentence"}. '
+        "Return JSON only, no prose, no code fences."
+    )
+    user = (
+        f"QUESTION: {question}\nREFERENCE ANSWER: {ground_truth}\n"
+        f"CANDIDATE ANSWER: {answer}\n\nIs the candidate answer correct?"
+    )
+    return system, user
+
+
 def editor_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     system = (
         "You are the editor step of an offline skill-optimization loop. "
@@ -71,6 +115,11 @@ def editor_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         '"category": "input|output", "slot_id": "stable_snake_case_id", '
         '"reason": "grounded explanation", '
         '"text": "complete slot text, or null for delete"}]}. '
+        "If the payload includes candidate_index and num_candidates > 1, "
+        "you are one of several independent proposals generated from the "
+        "same critic results for manual beam search -- explore a genuinely "
+        "different hypothesis than a generic single best-guess edit would, "
+        "so the candidates are worth comparing rather than near-duplicates. "
         "Return JSON only, no prose, no code fences."
     )
     user = json.dumps(payload, indent=2)

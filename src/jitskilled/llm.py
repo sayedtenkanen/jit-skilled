@@ -54,6 +54,12 @@ class SkillTTALLM(ABC):
     def editor(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return a dict: {"operations": [...]}."""
 
+    @abstractmethod
+    def judge(self, question: str, answer: str, ground_truth: str) -> dict[str, Any]:
+        """Return {"correct": bool, "reason": str}. Used by
+        grader.grade_with_judge as a fallback for answers the fast
+        deterministic check can't confidently resolve."""
+
 
 class PromptedLLM(SkillTTALLM):
     """Base class for backends driven by a single text-completion call.
@@ -88,6 +94,12 @@ class PromptedLLM(SkillTTALLM):
         system, user = prompts.editor_prompt(payload)
         return parse_json_response(
             retry_with_backoff(self._complete, system, user, max_tokens=600)
+        )
+
+    def judge(self, question, answer, ground_truth):
+        system, user = prompts.judge_prompt(question, answer, ground_truth)
+        return parse_json_response(
+            retry_with_backoff(self._complete, system, user, max_tokens=150)
         )
 
 
@@ -153,13 +165,21 @@ _VALUE_RE = re.compile(
 )
 
 
+def _render_mock_example(r: dict[str, Any]) -> str:
+    line = f"- similar question answered as: `{r['ground_truth']}`"
+    attempt, label = r.get("prior_attempt"), r.get("prior_label")
+    if attempt is not None and label is not None:
+        verdict = "correct" if label == "pass" else "wrong"
+        line += f" (a prior zero-shot attempt guessed `{attempt}`, which was {verdict})"
+    return line
+
+
 class MockClient(SkillTTALLM):
     """Deterministic keyword-overlap heuristic. See module docstring."""
 
     def synthesize_skill(self, framework, slot_library_text, target, retrieved):
         docs = sorted({r["source_doc"] for r in retrieved})
-        examples = "\n".join(f"- similar question answered as: `{r['ground_truth']}`"
-                              for r in retrieved[:3])
+        examples = "\n".join(_render_mock_example(r) for r in retrieved[:3])
         return (
             "# SKILL.md\n\n"
             "## Task Type\n"
@@ -213,21 +233,76 @@ class MockClient(SkillTTALLM):
         }
 
     def editor(self, payload):
+        # candidate_index varies which deterministic patch comes back, so
+        # multi-candidate optimize runs produce genuinely different
+        # candidates even against the mock backend (see optimize.py).
+        candidate_index = payload.get("candidate_index", 1)
+        if candidate_index % 3 == 1:
+            return {
+                "operations": [
+                    {
+                        "operation": "modify_slot",
+                        "category": "input",
+                        "slot_id": "prefer_nearest_sentence",
+                        "reason": f"[MOCK candidate {candidate_index}] reinforcing "
+                                  "based on placeholder critic lessons",
+                        "text": (
+                            "Answers are usually contained in a single sentence "
+                            "of the source document. Locate the sentence whose "
+                            "subject matches the question's subject, and if "
+                            "several numbers appear nearby, prefer the one in "
+                            "that exact sentence over ones in neighboring "
+                            "sentences."
+                        ),
+                    }
+                ]
+            }
+        if candidate_index % 3 == 2:
+            return {
+                "operations": [
+                    {
+                        "operation": "add_slot",
+                        "category": "input",
+                        "slot_id": "cross_check_neighboring_sentences",
+                        "reason": f"[MOCK candidate {candidate_index}] alternative "
+                                  "strategy: explicitly rule out adjacent sentences",
+                        "text": (
+                            "Before finalizing a number, check the sentence "
+                            "immediately before and after the matched sentence "
+                            "for a similar-looking value, and prefer the one "
+                            "whose surrounding words match the question's "
+                            "wording most closely."
+                        ),
+                    }
+                ]
+            }
         return {
             "operations": [
                 {
                     "operation": "modify_slot",
-                    "category": "input",
-                    "slot_id": "prefer_nearest_sentence",
-                    "reason": "[MOCK] reinforcing based on placeholder critic lessons",
+                    "category": "output",
+                    "slot_id": "answer_only",
+                    "reason": f"[MOCK candidate {candidate_index}] alternative "
+                              "strategy: tighten output formatting instead",
                     "text": (
-                        "Answers are usually contained in a single sentence "
-                        "of the source document. Locate the sentence whose "
-                        "subject matches the question's subject, and if "
-                        "several numbers appear nearby, prefer the one in "
-                        "that exact sentence over ones in neighboring "
-                        "sentences."
+                        "State only the final answer, with no surrounding "
+                        "explanation, caveats, or restatement of the question. "
+                        "If the retrieved examples' answers include a unit or "
+                        "symbol, the output must include it too."
                     ),
                 }
             ]
+        }
+
+    def judge(self, question, answer, ground_truth):
+        # [MOCK] word-overlap heuristic, not real semantic judgment -- good
+        # enough to prove grade_with_judge's escalation wiring works: use a
+        # real backend for actual grading quality on free-text answers.
+        answer_words = set(re.findall(r"[a-z0-9']+", answer.lower()))
+        gt_words = set(re.findall(r"[a-z0-9']+", ground_truth.lower()))
+        overlap = len(answer_words & gt_words) / max(1, len(gt_words))
+        correct = overlap >= 0.5
+        return {
+            "correct": correct,
+            "reason": f"[MOCK] {overlap:.0%} word overlap with reference answer",
         }

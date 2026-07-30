@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from .llm import SkillTTALLM
 from .retrieval import top_k_retrieve
@@ -11,6 +12,8 @@ _log = logging.getLogger(__name__)
 
 _REQUIRED_SECTIONS = ("## Task Type", "## Retrieval Notes",
                       "## Answering Strategy", "## Output Format")
+
+RetrieveFn = Callable[[str, list[dict], int, str | None], list[dict]]
 
 
 def _validate_skill(skill_text: str) -> list[str]:
@@ -26,9 +29,18 @@ def _validate_skill(skill_text: str) -> list[str]:
 
 def synthesize_skill_for_task(llm: SkillTTALLM, framework_text: str,
                                slot_library: dict, target: dict,
-                               pool: list[dict], k: int = 3) -> tuple[str, list[dict]]:
-    """Returns (skill_markdown, retrieved_examples)."""
-    retrieved = top_k_retrieve(
+                               pool: list[dict], k: int = 3,
+                               retrieve_fn: RetrieveFn = top_k_retrieve,
+                               ) -> tuple[str, list[dict]]:
+    """Returns (skill_markdown, retrieved_examples).
+
+    retrieve_fn defaults to the zero-dependency TF-IDF retriever
+    (retrieval.top_k_retrieve). Pass
+    `retrieval_embeddings.EmbeddingRetriever().top_k_retrieve` (or any
+    callable with the same signature) to use learned embeddings instead --
+    see run_pipeline.py's --retrieval flag.
+    """
+    retrieved = retrieve_fn(
         target["question"], pool, k=k, exclude_task_id=target["task_id"]
     )
     slot_text = render_slots(slot_library)

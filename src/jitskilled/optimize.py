@@ -1,11 +1,18 @@
 """Offline slot-library optimization: compare two runs, bucket by
-transition, run a critic per sampled case, run an editor to propose slot
-patches, and write a new slot-library version.
+transition, run a critic per sampled case (shared across candidates), then
+run --num_candidates independent editor proposals ("beam search" over
+possible slot-library edits) and write each as its own candidate file so
+you can pick the best one manually.
 
 Usage:
   python -m jitskilled.optimize \
       --current_run runs/v1 --previous_run runs/zero_shot \
-      --slot_library configs/slots_v1.yaml --output configs/slots_v2.yaml
+      --slot_library configs/slots_v1.yaml --output_prefix configs/slots_v2 \
+      --num_candidates 3
+
+Writes configs/slots_v2_candidate1.yaml, _candidate2.yaml, _candidate3.yaml,
+plus configs/slots_v2_summary.json with the shared critic results and every
+candidate's patch for comparison.
 """
 from __future__ import annotations
 
@@ -106,7 +113,14 @@ def main() -> None:
     parser.add_argument("--current_run", required=True)
     parser.add_argument("--previous_run", required=True)
     parser.add_argument("--slot_library", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--output_prefix", required=True,
+                         help="Candidates are written to "
+                              "<prefix>_candidate<N>.yaml and the shared "
+                              "summary to <prefix>_summary.json.")
+    parser.add_argument("--num_candidates", type=int, default=3,
+                         help="Number of independent editor proposals to "
+                              "generate from the same (shared) critic "
+                              "results. Default: 3.")
     parser.add_argument("--max_cases", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -146,37 +160,59 @@ def main() -> None:
         print(f"  critic[{task_id}] ({buckets[task_id]}): "
               f"lesson={result.get('lesson')!r}")
 
-    editor_payload = {
-        "slot_schema": {"categories": ["input", "output"]},
-        "current_slot_library": current_slots,
-        "current_slot_library_rendered": render_slots(current_slots),
-        "run_summary": {
-            "transition_counts": transition_counts,
-            "current_run": args.current_run,
-            "previous_run": args.previous_run,
-        },
-        "case_critic_results": critic_results,
-    }
-    patch = llm.editor(editor_payload)
-    print(f"[optimize] editor proposed {len(patch.get('operations', []))} operation(s)")
-    for op in patch.get("operations", []):
-        print(f"  {op['operation']} [{op['category']}] {op['slot_id']}: {op.get('reason')}")
+    # Critic results are shared across every candidate (that's the expensive,
+    # per-case reasoning step); each candidate gets its own independent
+    # editor call over those same results, so N candidates cost N editor
+    # calls but only one round of critique, not N.
+    candidates = []
+    for candidate_index in range(1, args.num_candidates + 1):
+        editor_payload = {
+            "slot_schema": {"categories": ["input", "output"]},
+            "current_slot_library": current_slots,
+            "current_slot_library_rendered": render_slots(current_slots),
+            "run_summary": {
+                "transition_counts": transition_counts,
+                "current_run": args.current_run,
+                "previous_run": args.previous_run,
+            },
+            "case_critic_results": critic_results,
+            "candidate_index": candidate_index,
+            "num_candidates": args.num_candidates,
+            "instructions": (
+                "Propose a DIFFERENT edit than you would for other candidate "
+                "indices -- explore a distinct hypothesis about what would "
+                "improve the slot library, not a minor rewording of the same "
+                "idea." if args.num_candidates > 1 else None
+            ),
+        }
+        patch = llm.editor(editor_payload)
+        ops = patch.get("operations", [])
+        print(f"[optimize] candidate {candidate_index}: {len(ops)} operation(s)")
+        for op in ops:
+            print(f"    {op['operation']} [{op['category']}] {op['slot_id']}: {op.get('reason')}")
 
-    new_slots = apply_patch(current_slots, patch.get("operations", []))
-    save_slots(args.output, new_slots)
+        new_slots = apply_patch(current_slots, ops)
+        output_path = Path(f"{args.output_prefix}_candidate{candidate_index}.yaml")
+        save_slots(output_path, new_slots)
+        candidates.append({
+            "candidate_index": candidate_index,
+            "output_path": str(output_path),
+            "editor_patch": patch,
+        })
 
-    summary_path = Path(args.output).with_name(
-        f"{Path(args.output).stem}_optimize_summary.json"
-    )
+    summary_path = Path(f"{args.output_prefix}_summary.json")
     with open(summary_path, "w") as f:
         json.dump({
             "transition_counts": transition_counts,
             "sampled_task_ids": sampled_ids,
             "critic_results": critic_results,
-            "editor_patch": patch,
+            "candidates": candidates,
         }, f, indent=2)
 
-    print(f"[optimize] wrote {args.output} and {summary_path}")
+    candidate_paths = ", ".join(c["output_path"] for c in candidates)
+    print(f"[optimize] wrote {candidate_paths} and {summary_path}")
+    print("[optimize] compare candidates and promote one, e.g.: "
+          f"cp {candidates[0]['output_path']} <your next --slot_library>")
 
 
 if __name__ == "__main__":

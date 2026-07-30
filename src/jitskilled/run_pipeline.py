@@ -13,8 +13,9 @@ import argparse
 import json
 from pathlib import Path
 
-from .grader import grade
+from .grader import grade, grade_with_judge
 from .llm import get_client
+from .retrieval import top_k_retrieve
 from .slots import load_slots
 from .solver import solve_task
 from .synthesize import synthesize_skill_for_task
@@ -50,10 +51,32 @@ def main() -> None:
         help="LLM backend. Default: auto-detect from ANTHROPIC_API_KEY / "
              "JITSKILLED_LLM_BACKEND env var, falling back to mock.",
     )
+    parser.add_argument(
+        "--retrieval", choices=["tfidf", "embeddings"], default="tfidf",
+        help="Retrieval backend for --mode skill. tfidf (default) needs no "
+             "extra dependency. embeddings needs `pip install "
+             "jit-skilled[embeddings]`.",
+    )
+    parser.add_argument(
+        "--llm_grading", action="store_true",
+        help="Escalate answers grade() can't confidently resolve (free-text "
+             "ground truth with no boundary match) to an LLM judge instead "
+             "of grading them a hard fail. Numeric/currency/percentage "
+             "ground truth is never escalated -- see grader.grade_with_judge.",
+    )
     args = parser.parse_args()
 
     llm = get_client(args.llm)
     print(f"[run_pipeline] using {llm.__class__.__name__}")
+
+    retrieve_fn = top_k_retrieve
+    if args.retrieval == "embeddings":
+        try:
+            from .retrieval_embeddings import EmbeddingRetriever
+            retrieve_fn = EmbeddingRetriever().top_k_retrieve
+        except ImportError as exc:
+            raise SystemExit(str(exc)) from exc
+    print(f"[run_pipeline] using {args.retrieval} retrieval")
 
     documents = _load_documents()
     pool = _load_jsonl(ROOT / "data" / "evolve.jsonl")
@@ -77,13 +100,19 @@ def main() -> None:
         retrieved_ids = []
         if args.mode == "skill":
             skill_text, retrieved = synthesize_skill_for_task(
-                llm, framework_text, slot_library, target, pool, k=args.k
+                llm, framework_text, slot_library, target, pool, k=args.k,
+                retrieve_fn=retrieve_fn,
             )
             retrieved_ids = [r["task_id"] for r in retrieved]
             (skills_dir / f"{target['task_id']}.md").write_text(skill_text)
 
         answer = solve_task(llm, target["question"], doc_text, skill_text)
-        passed = grade(answer, target["ground_truth"])
+        if args.llm_grading:
+            passed, grade_reason = grade_with_judge(
+                llm, target["question"], answer, target["ground_truth"]
+            )
+        else:
+            passed, grade_reason = grade(answer, target["ground_truth"]), None
         correct += passed
 
         trajectories.append({
@@ -95,9 +124,11 @@ def main() -> None:
             "answer": answer,
             "ground_truth": target["ground_truth"],
             "label": "pass" if passed else "fail",
+            "grade_reason": grade_reason,
         })
         print(f"  {target['task_id']}: {'PASS' if passed else 'FAIL'} "
-              f"(answer={answer!r} gt={target['ground_truth']!r})")
+              f"(answer={answer!r} gt={target['ground_truth']!r})"
+              f"{f' [{grade_reason}]' if grade_reason else ''}")
 
     with open(run_dir / "trajectories.jsonl", "w") as f:
         for row in trajectories:
@@ -108,6 +139,7 @@ def main() -> None:
         json.dump({
             "mode": args.mode,
             "slot_library": args.slot_library if args.mode == "skill" else None,
+            "retrieval": args.retrieval if args.mode == "skill" else None,
             "num_tasks": len(targets),
             "num_correct": correct,
             "accuracy": accuracy,

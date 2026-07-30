@@ -36,8 +36,12 @@ _TIMEOUT_SECONDS = 120
 
 
 class AppleFoundationClient(PromptedLLM):
-    def __init__(self, cli_path: str | None = None):
+    def __init__(self, cli_path: str | None = None, timeout: int = _TIMEOUT_SECONDS):
         self._cli_path = cli_path or os.environ.get("APPLE_FM_CLI_PATH") or _DEFAULT_CLI
+        # Overridable so tests can contract-test the stdin/stdout JSON
+        # protocol (including the timeout path itself) against a stub CLI
+        # in seconds rather than waiting on the real 120s default.
+        self._timeout = timeout
 
     def _complete(self, system: str, user: str, max_tokens: int = 800) -> str:
         request = json.dumps({"system": system, "user": user, "max_tokens": max_tokens})
@@ -47,7 +51,7 @@ class AppleFoundationClient(PromptedLLM):
                 input=request,
                 capture_output=True,
                 text=True,
-                timeout=_TIMEOUT_SECONDS,
+                timeout=self._timeout,
             )
         except FileNotFoundError as exc:
             raise RuntimeError(
@@ -60,7 +64,7 @@ class AppleFoundationClient(PromptedLLM):
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
                 f"Apple Foundation Models CLI helper timed out after "
-                f"{_TIMEOUT_SECONDS}s."
+                f"{self._timeout}s."
             ) from exc
 
         if proc.returncode != 0:
