@@ -1,0 +1,11 @@
+Software Release Notes — Nimbus Platform v4.2
+
+Nimbus Platform v4.2 was released on September 15, 2026, with 47 bug fixes and 12 new features.
+The release reduced average API response time from 320ms to 185ms, a 42% improvement.
+Database storage requirements decreased by 8% due to a new compression algorithm.
+The update introduced role-based access control with 5 predefined roles: viewer, editor, manager, admin, and owner.
+Maximum team size per workspace increased from 50 to 200 members.
+SSO integration now supports SAML 2.0 and OpenID Connect providers.
+The free tier supports up to 3 users and 1 GB of storage.
+Enterprise pricing starts at $12 per user per month, billed annually.
+The mobile app (iOS and Android) requires iOS 16 or Android 13 as minimum OS version.

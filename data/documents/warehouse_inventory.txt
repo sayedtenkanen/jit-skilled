@@ -1,0 +1,11 @@
+Warehouse Inventory Report — Q3 2026
+
+Greenfield Distribution operates 3 warehouse facilities: Portland, Denver, and Austin.
+The Portland facility has 240,000 square feet of storage and handles 12,000 orders per month.
+Denver has 180,000 square feet and processes 8,500 orders per month.
+Austin is the newest facility at 95,000 square feet, handling 4,200 orders per month.
+Total inventory across all facilities is valued at $14.2 million.
+The company shipped 187,000 units in Q3 2026, up 15% from Q2 2026.
+Average order fulfillment time is 1.8 business days company-wide.
+Portland averages 1.5 days, Denver averages 2.1 days, and Austin averages 2.4 days.
+The return rate across all facilities is 3.2%, down from 4.1% in Q3 2025.

@@ -1,0 +1,21 @@
+# Editable slot library (v1 — starting point).
+# The synthesis LLM call draws on these as candidate guidance; it does not
+# have to use all of them verbatim. The offline optimizer edits this file
+# over time via add_slot / delete_slot / modify_slot operations.
+slots:
+  input:
+    - id: quote_exact_units
+      text: >-
+        When the source document states a value with a unit or symbol
+        ($, %, kg, m, "days"), copy that unit or symbol exactly as written
+        rather than paraphrasing, rounding, or converting it.
+    - id: prefer_nearest_sentence
+      text: >-
+        Answers are usually contained in a single sentence of the source
+        document. Locate the sentence whose subject matches the question's
+        subject before extracting a number or fact from it.
+  output:
+    - id: answer_only
+      text: >-
+        State only the final answer, with no surrounding explanation,
+        caveats, or restatement of the question.

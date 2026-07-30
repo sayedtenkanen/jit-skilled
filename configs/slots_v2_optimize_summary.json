@@ -1,0 +1,76 @@
+{
+  "transition_counts": {
+    "persistent_success": 4,
+    "persistent_failure": 1
+  },
+  "sampled_task_ids": [
+    "t0",
+    "t1",
+    "t2",
+    "t3",
+    "t4"
+  ],
+  "critic_results": [
+    {
+      "task_id": "t0",
+      "failure_attribution": null,
+      "success_attribution": "skill",
+      "evidence": [
+        "[MOCK] deterministic placeholder critic"
+      ],
+      "lesson": null,
+      "implicated_slot_id": null
+    },
+    {
+      "task_id": "t1",
+      "failure_attribution": null,
+      "success_attribution": "skill",
+      "evidence": [
+        "[MOCK] deterministic placeholder critic"
+      ],
+      "lesson": null,
+      "implicated_slot_id": null
+    },
+    {
+      "task_id": "t2",
+      "failure_attribution": "skill",
+      "success_attribution": null,
+      "evidence": [
+        "[MOCK] deterministic placeholder critic"
+      ],
+      "lesson": "When multiple numbers appear near the question's subject, prefer the one in the same sentence as the exact keyword match.",
+      "implicated_slot_id": "prefer_nearest_sentence"
+    },
+    {
+      "task_id": "t3",
+      "failure_attribution": null,
+      "success_attribution": "skill",
+      "evidence": [
+        "[MOCK] deterministic placeholder critic"
+      ],
+      "lesson": null,
+      "implicated_slot_id": null
+    },
+    {
+      "task_id": "t4",
+      "failure_attribution": null,
+      "success_attribution": "skill",
+      "evidence": [
+        "[MOCK] deterministic placeholder critic"
+      ],
+      "lesson": null,
+      "implicated_slot_id": null
+    }
+  ],
+  "editor_patch": {
+    "operations": [
+      {
+        "operation": "modify_slot",
+        "category": "input",
+        "slot_id": "prefer_nearest_sentence",
+        "reason": "[MOCK] reinforcing based on placeholder critic lessons",
+        "text": "Answers are usually contained in a single sentence of the source document. Locate the sentence whose subject matches the question's subject, and if several numbers appear nearby, prefer the one in that exact sentence over ones in neighboring sentences."
+      }
+    ]
+  }
+}

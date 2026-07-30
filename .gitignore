@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Swift
+apple_foundation_cli/.build/
+apple_foundation_cli/.swiftpm/
+
+# Project run artifacts
+runs/
+
+# OS
+.DS_Store

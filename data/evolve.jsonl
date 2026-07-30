@@ -1,0 +1,14 @@
+{"task_id": "e0", "source_doc": "q3_report", "question": "What was Aurora Robotics' Q3 2026 revenue?", "ground_truth": "$18.4 million"}
+{"task_id": "e1", "source_doc": "q3_report", "question": "What was the gross margin in Q3 2026?", "ground_truth": "61%"}
+{"task_id": "e2", "source_doc": "q3_report", "question": "How much cash did the company have at the end of Q3 2026?", "ground_truth": "$42 million"}
+{"task_id": "e3", "source_doc": "product_launch", "question": "What is the list price of the ARC-4 robotic arm?", "ground_truth": "$24,500"}
+{"task_id": "e4", "source_doc": "product_launch", "question": "What is the maximum payload of the ARC-4?", "ground_truth": "18 kilograms"}
+{"task_id": "e5", "source_doc": "product_launch", "question": "When does the ARC-4 launch?", "ground_truth": "November 3, 2026"}
+{"task_id": "e6", "source_doc": "hr_policy", "question": "How many PTO days do full-time employees accrue per year?", "ground_truth": "21 days"}
+{"task_id": "e7", "source_doc": "hr_policy", "question": "How many paid sick days do employees receive per year?", "ground_truth": "8 days"}
+{"task_id": "e8", "source_doc": "software_release", "question": "What was the API response time improvement in v4.2?", "ground_truth": "42%"}
+{"task_id": "e9", "source_doc": "software_release", "question": "How many users does the free tier support?", "ground_truth": "3"}
+{"task_id": "e10", "source_doc": "software_release", "question": "What is the enterprise pricing per user per month?", "ground_truth": "$12"}
+{"task_id": "e11", "source_doc": "warehouse_inventory", "question": "How many orders per month does the Portland facility handle?", "ground_truth": "12,000"}
+{"task_id": "e12", "source_doc": "warehouse_inventory", "question": "What is the total inventory value across all facilities?", "ground_truth": "$14.2 million"}
+{"task_id": "e13", "source_doc": "warehouse_inventory", "question": "What is the average order fulfillment time company-wide?", "ground_truth": "1.8 business days"}

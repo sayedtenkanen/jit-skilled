@@ -1,0 +1,11 @@
+{"task_id": "t0", "source_doc": "q3_report", "question": "What was Aurora Robotics' net income in Q3 2026?", "ground_truth": "$3.6 million"}
+{"task_id": "t1", "source_doc": "q3_report", "question": "How many employees did the company have at the end of Q3 2026?", "ground_truth": "214"}
+{"task_id": "t2", "source_doc": "product_launch", "question": "What is the volume discount for orders of 10 or more ARC-4 units?", "ground_truth": "12%"}
+{"task_id": "t3", "source_doc": "product_launch", "question": "How much faster is the ARC-4 than the ARC-3 in pick-and-place cycles?", "ground_truth": "30%"}
+{"task_id": "t4", "source_doc": "hr_policy", "question": "How many PTO days can employees carry over to the next year?", "ground_truth": "5 days"}
+{"task_id": "t5", "source_doc": "software_release", "question": "What was the database storage reduction in v4.2?", "ground_truth": "8%"}
+{"task_id": "t6", "source_doc": "software_release", "question": "What is the minimum iOS version required for the mobile app?", "ground_truth": "16"}
+{"task_id": "t7", "source_doc": "software_release", "question": "How many predefined roles does RBAC include?", "ground_truth": "5"}
+{"task_id": "t8", "source_doc": "warehouse_inventory", "question": "How many units were shipped in Q3 2026?", "ground_truth": "187,000"}
+{"task_id": "t9", "source_doc": "warehouse_inventory", "question": "What is the return rate across all facilities in Q3 2026?", "ground_truth": "3.2%"}
+{"task_id": "t10", "source_doc": "warehouse_inventory", "question": "How many square feet does the Denver facility have?", "ground_truth": "180,000"}

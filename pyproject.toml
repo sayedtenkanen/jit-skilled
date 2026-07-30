@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.24,<2.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jit-skilled"
+dynamic = ["version"]
+description = "Just-in-time skill synthesis for LLM agents: retrieve->synthesize->solve->grade->optimize, adapted from the SkillTTA pattern"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "CEO-ST" }]
+dependencies = [
+    "PyYAML>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40,<1.0"]
+dev = [
+    "pytest>=8.0,<9.0",
+    "ruff>=0.6,<1.0",
+]
+
+[project.scripts]
+jitskilled-run = "jitskilled.run_pipeline:main"
+jitskilled-optimize = "jitskilled.optimize:main"
+
+[tool.hatch.version]
+path = "src/jitskilled/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jitskilled"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
