@@ -19,34 +19,34 @@ a **mock** heuristic that needs no setup at all.
 ## What's here
 
 ```
-pyproject.toml            packaging, deps, ruff config, CLI entry points
-LICENSE                    MIT
-.github/workflows/ci.yml    lint + test on push/PR
+pyproject.toml              packaging, deps, ruff config, CLI entry points
+LICENSE                     MIT
+.github/workflows/ci.yml   lint + test on push/PR
 data/
-  documents/                 3 short synthetic "source of truth" documents
-  evolve.jsonl                8 Q&A pairs used as the retrieval pool
-  test.jsonl                   5 held-out Q&A pairs used for evaluation
+  documents/               5 short synthetic "source of truth" documents
+  evolve.jsonl             14 Q&A pairs used as the retrieval pool
+  test.jsonl               11 held-out Q&A pairs used for evaluation
 configs/
-  framework.md                 fixed SKILL.md skeleton
-  slots_v1.yaml                  starting editable slot library
+  framework.md             fixed SKILL.md skeleton
+  slots_v1.yaml            starting editable slot library
 src/jitskilled/
-  llm.py                          SkillTTALLM interface, PromptedLLM base,
-                                   AnthropicClient, MockClient, get_client()
-  llm_ollama.py                    OllamaClient (local models via REST)
-  llm_apple.py                      AppleFoundationClient (subprocess bridge)
-  prompts.py                         shared prompt text for all real backends
-  _util.py                            robust LLM-JSON-response parsing
-  retrieval.py                         pure-Python TF-IDF cosine top-k
-  synthesize.py                         builds the SKILL.md for one task
-  solver.py                              answers a question, with/without a skill
-  grader.py                               automatic pass/fail check
-  slots.py                                 load/save/patch the slot library YAML
-  optimize.py                               offline critic/editor loop
-  run_pipeline.py                            eval CLI
-  __main__.py                                 `python -m jitskilled run|optimize`
-apple_foundation_cli/       Swift helper for the Apple backend (build on macOS)
-tests/                        pytest suite (unit + subprocess-level CLI tests)
-runs/                           created when you run the pipeline
+  llm.py                   SkillTTALLM interface, PromptedLLM base,
+                           AnthropicClient, MockClient, get_client()
+  llm_ollama.py            OllamaClient (local models via REST)
+  llm_apple.py             AppleFoundationClient (subprocess bridge)
+  prompts.py               shared prompt text for all real backends
+  _util.py                 robust LLM-JSON-response parsing + retry
+  retrieval.py             pure-Python TF-IDF cosine top-k
+  synthesize.py            builds the SKILL.md for one task
+  solver.py                answers a question, with/without a skill
+  grader.py                automatic pass/fail check
+  slots.py                 load/save/patch the slot library YAML
+  optimize.py              offline critic/editor loop
+  run_pipeline.py          eval CLI
+  __main__.py              `python -m jitskilled run|optimize`
+apple_foundation_cli/      Swift helper for the Apple backend (build on macOS)
+tests/                     pytest suite (76 tests, unit + CLI subprocess)
+runs/                      created when you run the pipeline
 ```
 
 ## Install
