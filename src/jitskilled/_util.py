@@ -38,6 +38,7 @@ def retry_with_backoff(fn: Callable[..., _T], *args: Any,
                 or "overloaded" in msg or "try again" in msg
                 or "connection" in msg or "temporarily" in msg
                 or "decoding" in msg or "decode" in msg
+                or "could not parse json" in msg
             )
             if not _retryable:
                 raise

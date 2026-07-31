@@ -62,7 +62,7 @@ src/jitskilled/
   optimize.py              offline critic + multi-candidate editor loop
   run_pipeline.py          eval CLI
   __main__.py              `python -m jitskilled run|optimize`
-tests/                     pytest suite (111 tests: unit, CLI subprocess,
+tests/                     pytest suite (117 tests: unit, CLI subprocess,
                            data integrity, Apple backend contract tests)
 runs/                      created when you run the pipeline
 ```
@@ -206,7 +206,7 @@ installs on macOS.
 ## Tests
 
 ```bash
-pytest         # 111 tests: unit, subprocess-level CLI, data integrity, and
+pytest         # 117 tests: unit, subprocess-level CLI, data integrity, and
                # Apple-backend contract tests, all against MockClient or a
                # fake apple_fm_sdk module -- no live model or network call
                # required
@@ -288,7 +288,7 @@ been addressed, though "addressed" means something more specific than
   scrutiny in: the optimizer's critic/editor loop is only as good as the
   correctness signal it's reacting to, and a biased or noisy grader will
   quietly steer the slot library in the wrong direction.
-- **Apple Foundation Models backend.** Contract-tested, not device-tested
+- **Apple Foundation Models backend.** Contract-tested AND device-verified
   -- and simpler than it was. This backend originally shelled out to a
   hand-written Swift CLI, since there was no Python API for Apple's
   on-device model at the time. Apple has since shipped one directly
@@ -298,12 +298,61 @@ been addressed, though "addressed" means something more specific than
   contract to keep in sync. `tests/test_llm_apple.py` exercises
   `AppleFoundationClient` against a fake module matching the SDK's
   documented public shape, covering availability checks, instructions/
-  options passthrough, and error translation. Caveat: this still cannot
-  be verified beyond that contract in this environment -- there's no
-  macOS 26+/Apple Silicon hardware available here, so the real
-  `apple-fm-sdk` package has never actually been installed or run against
-  live on-device model here. The fake in the tests mirrors Apple's
-  published API reference as of when this was written; if the real SDK's
-  behavior has since diverged (error types, `respond()` signature,
-  `GenerationOptions` fields), that would surface as a real failure on
-  first use, not something these tests can catch.
+  options passthrough, and error translation -- that part still runs
+  without a Mac, in CI. On top of that, it has now been run for real on
+  both solving paths: `run --llm apple --mode zero_shot` scored 10/11
+  (91%), and `run --llm apple --mode skill` (skill synthesis +
+  skill-conditioned solving) scored 10/11 (91%) too, confirming the
+  whole path -- session creation, `respond()`, answer parsing, skill
+  synthesis, grading -- works end to end on real hardware, not just
+  against the fake. Both runs also showed the on-device model doesn't
+  reliably follow the "answer only, no explanation" instruction in
+  `solve_prompt` (stray non-English text and tool-call-shaped
+  scaffolding wrapped around otherwise-correct answers, e.g. `t2`/`t8`);
+  `grader.py`'s numeric-token matching tolerated that noise here, but a
+  stricter grader or free-text ground truth wouldn't be as forgiving.
+  A first attempt to device-verify the optimize loop without `--llm apple`
+  auto-detected `MockClient` instead (no `ANTHROPIC_API_KEY` set); its
+  candidate patch, promoted and re-run against the real backend, *dropped*
+  accuracy from 91% to 73% (8/11) -- a real demonstration that a patch
+  authored by (or for) one backend's quirks doesn't necessarily transfer
+  to another, and that blindly promoting a candidate without
+  re-evaluating it against held-out data can make things worse. That's
+  exactly why this repo treats candidate promotion as a manual,
+  compare-before-promoting step rather than an automatic one.
+
+  Re-running `optimize --llm apple ...` for real then surfaced an actual
+  bug: the on-device model's `editor()` response included a critic-authored
+  reason string containing an unescaped literal quote (something like
+  `unit disambiguation for ambiguous phrasing (e.g., "many units")`
+  written straight into a JSON string value), which broke `json.loads`
+  and crashed the whole run -- because `retry_with_backoff` only wrapped
+  the raw `_complete()` call, not the `parse_json_response()` step after
+  it, so a single malformed generation had no chance to retry. Fixed on
+  both sides: `critic()`/`editor()`/`judge()` in `llm.py` now wrap
+  generation and parsing together in one retryable unit (see
+  `tests/test_prompted_llm_retry.py`), and `retry_with_backoff` treats
+  "could not parse json" as a retryable condition; every JSON-returning
+  prompt in `prompts.py` also now explicitly warns the model against
+  embedding unescaped quotes in string values, to reduce how often this
+  happens in the first place.
+
+  The fix has since been confirmed against the real backend: a follow-up
+  `optimize --llm apple ...` run hit three more malformed-JSON responses
+  from the on-device model (one truncated mid-object, one wrapped in a
+  ` ```json ` code fence around otherwise-broken JSON, one with the same
+  unescaped-quote pattern as before) and recovered from all three via
+  retry, completing the run end to end -- critic pass, three editor
+  candidates, and a summary file all written successfully. So the
+  critic/editor optimize loop is now device-verified too, not just
+  zero-shot and skill-mode solving. Caveats that remain: retrying is a
+  mitigation, not a guarantee -- a run that fails the same way on every
+  attempt will still raise after `max_retries`. And syntactic recovery
+  isn't the same as content quality: one recovered candidate in that run
+  had every `"reason"` field literally set to the placeholder string
+  `"grounded explanation"` from the prompt's own JSON schema example,
+  i.e. valid JSON that the model produced by copying the schema
+  description instead of writing a real explanation. `retry_with_backoff`
+  has no way to detect that kind of degenerate-but-well-formed output; a
+  human comparing candidates before promoting one (as this repo already
+  requires) is still the real check against it.

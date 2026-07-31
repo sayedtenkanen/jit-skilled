@@ -87,21 +87,32 @@ class PromptedLLM(SkillTTALLM):
 
     def critic(self, case_payload):
         system, user = prompts.critic_prompt(case_payload)
-        return parse_json_response(
-            retry_with_backoff(self._complete, system, user, max_tokens=500)
-        )
+
+        def _generate_and_parse() -> dict[str, Any]:
+            return parse_json_response(self._complete(system, user, max_tokens=500))
+
+        # The retry wraps generation AND parsing together, not just the raw
+        # API call: a malformed-JSON response (e.g. an on-device model
+        # emitting an unescaped quote inside a string value) is a one-off
+        # generation quirk worth retrying, not just a network hiccup. See
+        # _util.retry_with_backoff's "could not parse json" retry trigger.
+        return retry_with_backoff(_generate_and_parse)
 
     def editor(self, payload):
         system, user = prompts.editor_prompt(payload)
-        return parse_json_response(
-            retry_with_backoff(self._complete, system, user, max_tokens=600)
-        )
+
+        def _generate_and_parse() -> dict[str, Any]:
+            return parse_json_response(self._complete(system, user, max_tokens=600))
+
+        return retry_with_backoff(_generate_and_parse)
 
     def judge(self, question, answer, ground_truth):
         system, user = prompts.judge_prompt(question, answer, ground_truth)
-        return parse_json_response(
-            retry_with_backoff(self._complete, system, user, max_tokens=150)
-        )
+
+        def _generate_and_parse() -> dict[str, Any]:
+            return parse_json_response(self._complete(system, user, max_tokens=150))
+
+        return retry_with_backoff(_generate_and_parse)
 
 
 def get_client(backend: str | None = None) -> SkillTTALLM:

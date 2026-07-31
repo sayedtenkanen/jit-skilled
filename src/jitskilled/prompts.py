@@ -71,6 +71,15 @@ def solve_prompt(question: str, document_text: str,
     return system, user
 
 
+_JSON_STRICTNESS_NOTE = (
+    " Every string value must be valid JSON: escape any double quote "
+    "character that appears inside a string as \\\", or better, avoid "
+    "quoting words or phrases inside string values altogether (write "
+    "unusual units for example, not \"unusual\" units) -- a single "
+    "unescaped quote breaks the whole response."
+)
+
+
 def critic_prompt(case_payload: dict[str, Any]) -> tuple[str, str]:
     system = (
         "You are the critic step of an offline skill-optimization loop. "
@@ -81,6 +90,7 @@ def critic_prompt(case_payload: dict[str, Any]) -> tuple[str, str]:
         "instruction or null), implicated_slot_id (existing id or null). "
         "Exactly one of failure_attribution/success_attribution must be "
         "non-null. Return JSON only, no prose, no code fences."
+        + _JSON_STRICTNESS_NOTE
     )
     user = json.dumps(case_payload, indent=2)
     return system, user
@@ -100,6 +110,7 @@ def judge_prompt(question: str, answer: str, ground_truth: str) -> tuple[str, st
         "different facts, numbers, or entities. Return ONLY a JSON object: "
         '{"correct": true|false, "reason": "one grounded sentence"}. '
         "Return JSON only, no prose, no code fences."
+        + _JSON_STRICTNESS_NOTE
     )
     user = (
         f"QUESTION: {question}\nREFERENCE ANSWER: {ground_truth}\n"
@@ -124,6 +135,7 @@ def editor_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "different hypothesis than a generic single best-guess edit would, "
         "so the candidates are worth comparing rather than near-duplicates. "
         "Return JSON only, no prose, no code fences."
+        + _JSON_STRICTNESS_NOTE
     )
     user = json.dumps(payload, indent=2)
     return system, user
